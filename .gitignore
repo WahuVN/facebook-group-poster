@@ -1,0 +1,34 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual env (rat lon - chua exe + pyc)
+.venv/
+venv/
+env/
+
+# Playwright/Selenium browsers cache
+.playwright/
+ms-playwright/
+
+# IDE / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+
+# Env / secrets
+.env
+.env.local
+*.env
+
+# Local data
+*.log
+*.sqlite
+*.db
+cookies.json
+session.json
+posts.csv
+!posts.sample.csv

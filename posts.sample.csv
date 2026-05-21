@@ -1,0 +1,4 @@
+enabled,group_url,video_path,caption,schedule_at,audience
+1,https://www.facebook.com/groups/your-group-1,D:\VIDEO\video1.mp4,"Nội dung bài 1\n#hashtag",2026-05-05 21:30,default
+1,https://www.facebook.com/me,./videos/video2.mp4,"Bài đăng trang cá nhân",2026-05-05 22:00,friends
+0,https://www.facebook.com/groups/skip-this,./videos/video3.mp4,"Bài này đang tắt",,default
