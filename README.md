@@ -1,116 +1,77 @@
-﻿# FB Group Video Poster (GUI + CLI)
+# 📢 Facebook Group Auto Poster (GUI + CLI)
 
-Tool Python nhẹ để tự đăng video vào các nhóm Facebook từ danh sách bạn chuẩn bị sẵn.
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python" />
+  <img src="https://img.shields.io/badge/Engine-Playwright-2EAD33?style=for-the-badge&logo=playwright&logoColor=white" alt="Playwright" />
+  <img src="https://img.shields.io/badge/UI-Tkinter-FFD43B?style=for-the-badge&logo=python&logoColor=black" alt="GUI" />
+  <img src="https://img.shields.io/badge/Platform-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Windows" />
+</p>
 
-## 1) Mở nhanh (khuyên dùng)
+Công cụ tự động đăng bài viết và video hàng loạt lên các Nhóm (Facebook Groups) hoặc Trang cá nhân qua **Playwright**, tích hợp giao diện **Tkinter GUI** hiện đại kèm chế độ dòng lệnh **CLI**.
 
-- Double click file: `Start_FB_Tool.bat`
-- Script này sẽ tự tạo `.venv`, cài package, rồi mở GUI.
+---
 
-## 2) Chạy bản giao diện bằng lệnh
+## ✨ Tính năng chính
 
+- 🖥️ **Giao diện người dùng đầy đủ (Tkinter GUI)**: Kéo-thả video/hình ảnh, chỉnh sửa nội dung bài viết trực quan.
+- 🌐 **Tích hợp Profile Cốc Cốc / Chrome**: Sử dụng trực tiếp profile trình duyệt có sẵn để không cần đăng nhập lại tài khoản Facebook.
+- 📋 **Quản lý hàng đợi bài đăng (Post Queue)**:
+  - Hỗ trợ nhập/xuất danh sách nhóm từ file `.txt`.
+  - Hẹn giờ đăng bài tự động (`Schedule`), đặt bước nhảy thời gian thông minh giữa các nhóm.
+  - Tùy chỉnh quyền riêng tư (`Công khai`, `Bạn bè`, `Chỉ mình tôi`).
+- 🤖 **Tự động hóa an toàn với Playwright**:
+  - Tự động vượt các popup cảnh báo, điền caption và upload video.
+  - Hỗ trợ chế độ chạy ẩn danh/không bật cửa sổ (`Headless mode`) và chế độ thử nghiệm không đăng thật (`Dry Run`).
+- 📊 **Theo dõi trạng thái thời gian thực**: Log chi tiết tiến trình đăng, đếm ngược thời gian chờ giữa các bài viết để chống checkpoint/spam.
+
+---
+
+## 🚀 Hướng dẫn khởi chạy
+
+### 1. Khởi động nhanh (Khuyên dùng)
+Nhấp đúp chuột vào file:
+```cmd
+Start_FB_Tool.bat
+```
+*(Script sẽ tự động kiểm tra Python, khởi tạo môi trường `.venv`, cài đặt thư viện cần thiết và mở giao diện GUI).*
+
+### 2. Cài đặt thủ công
 ```bash
+# Tạo và kích hoạt môi trường ảo
+python -m venv .venv
+.\.venv\Scripts\activate
+
+# Cài đặt thư viện và trình duyệt Chromium cho Playwright
+pip install -r requirements.txt
+python -m playwright install chromium
+
+# Chạy giao diện GUI
 python fb_group_poster_gui.py
 ```
 
-## 3) Dùng Cốc Cốc profile A1 (đã tích hợp)
-
-Trong GUI, ngay phần **Cấu hình chạy**:
-
-1. Tick `Dùng Cốc Cốc profile thật`
-2. `Cốc Cốc exe`: để mặc định hoặc trỏ tới:
-   - `C:\Program Files\CocCoc\Browser\Application\browser.exe`
-3. `User Data`: để mặc định:
-   - `C:\Users\<user>\AppData\Local\CocCoc\Browser\User Data`
-4. Bấm `Quét profile`
-5. Bấm `Chọn nhanh A1` (hoặc chọn tay `A1 (Profile 4)` nếu có)
-6. Bấm `Start`
-
-> Nếu báo lỗi profile bị khóa (`locked`), hãy tắt hết cửa sổ Cốc Cốc rồi chạy lại.
-
-## 4) Luồng dùng GUI
-
-1. **Danh sách nhóm**: thêm `group_url` (hoặc import từ file `.txt`, mỗi dòng 1 link).
-2. **Soạn bài**:
-   - Chọn media (video/hình) hoặc kéo-thả trực tiếp vào cửa sổ
-   - Nhập giờ đăng (ví dụ `2026-05-05 21:30`) hoặc để trống để đăng ngay
-   - Chọn quyền riêng tư: `Mặc định` / `Công khai` / `Bạn bè` / `Chỉ mình tôi`
-   - Nhập caption
-3. Bấm:
-   - `Thêm nhóm chọn`, hoặc
-   - `Thêm tất cả nhóm`
-4. Kiểm tra hàng đợi, rồi bấm `Start`.
-5. Khi cần dừng thì bấm `Stop`.
-
-### Tính năng GUI
-
-- Quản lý nhiều nhóm và nhiều bài trong hàng đợi
-- Nhúng sẵn 4 nhóm WW: bấm `Nạp 4 nhóm WW`
-- Đăng trang cá nhân nhanh: bấm `Thêm trang cá nhân` (đích `https://www.facebook.com/me`)
-- Tùy chỉnh quyền riêng tư khi đích là trang cá nhân (Công khai/Bạn bè/Chỉ mình tôi)
-- Quản lý nhóm nhanh: `Cập nhật nhóm chọn`, `Mở nhóm`, `Import TXT`, `Export TXT`
-- Kéo-thả vào cửa sổ: nhận media ngay, và hỗ trợ import nhóm từ `.txt`
-- Nút giờ nhanh: `Now`, `+5m`, `+15m`, `+30m`, `+60m`
-- Xếp lịch theo nhóm: chọn `Bước lịch (phút)` rồi bấm `Xếp lịch theo nhóm chọn`
-- Double click dòng queue để nạp lại editor và sửa nhanh
-- `Cập nhật dòng chọn` + `Nhân đôi dòng`
-- Chọn nhiều nhóm nhanh: `Chọn tất cả` / `Bỏ chọn`
-- Áp dụng hàng loạt: `Áp dụng giờ cho dòng chọn`, `Áp dụng giờ cho tất cả`, `Áp dụng nhóm chọn`, `Áp dụng media cho dòng chọn`
-- Áp dụng hàng loạt quyền riêng tư cho các dòng đã chọn trong queue
-- Nút `Chẩn đoán` kiểm tra nhanh profile/video/path
-- Lưu/Nạp plan (`.json`)
-- `Dry Run` để thử dữ liệu mà không đăng thật
-- `Headless` để chạy ẩn trình duyệt
-- Log realtime và trạng thái chờ đếm ngược
-
-## 5) Nếu vẫn chưa mở được tool
-
-1. Chạy bằng `Start_FB_Tool.bat` (không chạy bằng click vào `.py`).
-2. Tắt toàn bộ Cốc Cốc rồi mở lại tool.
-3. Trong GUI bấm `Chẩn đoán` để xem mục nào lỗi.
-4. Nếu lỗi Python, cài lại Python 3.11+ và tick `Add Python to PATH` khi cài.
-5. Nếu lỗi profile, kiểm tra:
-   - `Cốc Cốc exe`: `C:\Program Files\CocCoc\Browser\Application\browser.exe`
-   - `User Data`: `C:\Users\<user>\AppData\Local\CocCoc\Browser\User Data`
-   - Profile: `A1 (Profile 4)`
-
-## 6) Cài đặt thủ công (nếu không dùng BAT)
-
-```bash
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-python -m playwright install chromium
-```
-
-## 7) Chạy bản CLI (tuỳ chọn)
-
+### 3. Chạy qua dòng lệnh (CLI Mode)
+Bạn có thể tự động hóa bằng file danh sách `.csv`:
 ```bash
 python fb_group_poster.py --csv posts.csv
 ```
+*(Tham khảo cấu trúc file mẫu tại `posts.sample.csv`).*
 
-- Dùng `posts.sample.csv` làm mẫu để tạo `posts.csv`.
-- Cột CSV: `enabled,group_url,video_path,caption,schedule_at,audience`.
-- `audience` là tùy chọn: `default` / `public` / `friends` / `only_me` (chủ yếu dùng cho trang cá nhân).
+---
 
-## 8) Cấu hình ENV (tuỳ chọn)
+## 📖 Hướng dẫn sử dụng cơ bản
 
-Copy `.env.example` thành `.env` rồi chỉnh nếu cần:
+1. **Chọn Profile Trình duyệt**:
+   - Tích chọn `Dùng profile thật` $	o$ chọn profile đã đăng nhập sẵn Facebook (Chrome hoặc Cốc Cốc) $	o$ bấm **Chẩn đoán** để kiểm tra kết nối.
+2. **Nhập danh sách nhóm**:
+   - Thêm từng link Group hoặc bấm **Import TXT** để tải danh sách hàng loạt.
+3. **Soạn bài & Đặt lịch**:
+   - Chọn media (kéo thả video/ảnh vào giao diện), nhập Caption bài viết và chọn thời gian đăng.
+   - Bấm **Thêm tất cả nhóm** để đưa vào Hàng đợi (Queue).
+4. **Bắt đầu đăng**:
+   - Kiểm tra lại hàng đợi $	o$ bấm **Start** để tool tự động thực hiện.
 
-- `HEADLESS`
-- `FB_SESSION_PATH`
-- `FB_LOCALE`
-- `FB_TIMEZONE`
-- `SLOW_MO_MS`
-- `POST_TIMEOUT_MS`
-- `MIN_DELAY_SECONDS`
-- `MAX_DELAY_SECONDS`
-- `BROWSER_EXECUTABLE_PATH`
-- `BROWSER_USER_DATA_DIR`
-- `BROWSER_PROFILE_DIRECTORY`
+---
 
-## 9) Lưu ý quan trọng
-
-- Chỉ dùng cho tài khoản/nhóm bạn có quyền đăng bài.
-- Giao diện Facebook có thể đổi; khi đó cần cập nhật selector.
-- Đăng quá dày có thể bị giới hạn tính năng tài khoản.
+## ⚠️ Lưu ý quan trọng
+- *Chỉ sử dụng công cụ cho các tài khoản và nhóm bạn có quyền quản trị hoặc được phép đăng bài.*
+- *Nên cài đặt khoảng cách thời gian giữa các bài đăng (`MIN_DELAY_SECONDS`, `MAX_DELAY_SECONDS`) hợp lý để tránh bị hạn chế tài khoản.*
