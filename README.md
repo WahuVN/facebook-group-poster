@@ -1,77 +1,89 @@
-# 📢 Facebook Group Auto Poster (GUI + CLI)
+# Facebook Publishing Assistant
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python" />
-  <img src="https://img.shields.io/badge/Engine-Playwright-2EAD33?style=for-the-badge&logo=playwright&logoColor=white" alt="Playwright" />
-  <img src="https://img.shields.io/badge/UI-Tkinter-FFD43B?style=for-the-badge&logo=python&logoColor=black" alt="GUI" />
-  <img src="https://img.shields.io/badge/Platform-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Windows" />
-</p>
+A local Windows desktop tool for planning and publishing posts to Facebook destinations that you control or are authorized to use. It combines a **Tkinter GUI** with a **Playwright** automation engine and a scriptable CLI.
 
-Công cụ tự động đăng bài viết và video hàng loạt lên các Nhóm (Facebook Groups) hoặc Trang cá nhân qua **Playwright**, tích hợp giao diện **Tkinter GUI** hiện đại kèm chế độ dòng lệnh **CLI**.
+## What it demonstrates
 
----
+- Desktop workflow design with GUI + CLI entry points.
+- Browser automation through Playwright with persistent or temporary sessions.
+- CSV-driven task loading and validation.
+- Scheduled queues, per-task audience settings, dry-run mode, stop controls and progress logging.
+- Import/export workflows for destination lists and post plans.
+- Error screenshots and session persistence for debugging.
+- Pure helper logic covered by unit tests and Windows CI.
 
-## ✨ Tính năng chính
+## Responsible use
 
-- 🖥️ **Giao diện người dùng đầy đủ (Tkinter GUI)**: Kéo-thả video/hình ảnh, chỉnh sửa nội dung bài viết trực quan.
-- 🌐 **Tích hợp Profile Cốc Cốc / Chrome**: Sử dụng trực tiếp profile trình duyệt có sẵn để không cần đăng nhập lại tài khoản Facebook.
-- 📋 **Quản lý hàng đợi bài đăng (Post Queue)**:
-  - Hỗ trợ nhập/xuất danh sách nhóm từ file `.txt`.
-  - Hẹn giờ đăng bài tự động (`Schedule`), đặt bước nhảy thời gian thông minh giữa các nhóm.
-  - Tùy chỉnh quyền riêng tư (`Công khai`, `Bạn bè`, `Chỉ mình tôi`).
-- 🤖 **Tự động hóa an toàn với Playwright**:
-  - Tự động vượt các popup cảnh báo, điền caption và upload video.
-  - Hỗ trợ chế độ chạy ẩn danh/không bật cửa sổ (`Headless mode`) và chế độ thử nghiệm không đăng thật (`Dry Run`).
-- 📊 **Theo dõi trạng thái thời gian thực**: Log chi tiết tiến trình đăng, đếm ngược thời gian chờ giữa các bài viết để chống checkpoint/spam.
+Use this project only with accounts, pages, profiles and groups where you have permission to publish. Facebook can change its UI and automation rules at any time; review the applicable platform terms and rate limits before use.
 
----
+The default workflow includes delays between tasks and a **Dry Run** mode so a queue can be validated without publishing.
 
-## 🚀 Hướng dẫn khởi chạy
+## Requirements
 
-### 1. Khởi động nhanh (Khuyên dùng)
-Nhấp đúp chuột vào file:
-```cmd
-Start_FB_Tool.bat
-```
-*(Script sẽ tự động kiểm tra Python, khởi tạo môi trường `.venv`, cài đặt thư viện cần thiết và mở giao diện GUI).*
+- Windows 10/11
+- Python 3.10+
+- A supported Chromium-based browser or Playwright Chromium
 
-### 2. Cài đặt thủ công
-```bash
-# Tạo và kích hoạt môi trường ảo
+```powershell
 python -m venv .venv
-.\.venv\Scripts\activate
-
-# Cài đặt thư viện và trình duyệt Chromium cho Playwright
-pip install -r requirements.txt
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
 python -m playwright install chromium
+```
 
-# Chạy giao diện GUI
+## Run the GUI
+
+```powershell
 python fb_group_poster_gui.py
 ```
 
-### 3. Chạy qua dòng lệnh (CLI Mode)
-Bạn có thể tự động hóa bằng file danh sách `.csv`:
-```bash
-python fb_group_poster.py --csv posts.csv
+Or double-click `Start_FB_Tool.bat`.
+
+## CLI
+
+```powershell
+python fb_group_poster.py --csv posts.csv --dry-run
 ```
-*(Tham khảo cấu trúc file mẫu tại `posts.sample.csv`).*
+
+Start from `posts.sample.csv`. Supported fields include `enabled`, `group_url`, `video_path`, `caption`, `schedule_at`, and `audience`.
+
+Accepted schedule formats include `YYYY-MM-DD HH:MM`, `DD/MM/YYYY HH:MM`, and variants with seconds.
+
+## Browser/session options
+
+Configuration can be supplied through `.env` (copy `.env.example`) or the GUI. Local session files, browser profiles and `.env` files are ignored by Git.
+
+Useful settings include:
+
+- `HEADLESS`
+- `FB_SESSION_PATH`
+- `FB_LOCALE` / `FB_TIMEZONE`
+- `MIN_DELAY_SECONDS` / `MAX_DELAY_SECONDS`
+- `POST_TIMEOUT_MS`
+- `BROWSER_EXECUTABLE_PATH`
+- `BROWSER_USER_DATA_DIR`
+- `BROWSER_PROFILE_DIRECTORY`
+
+## Tests
+
+```powershell
+python -m unittest discover -s tests -v
+python -m compileall -q fb_group_poster.py fb_group_poster_gui.py tests
+```
+
+## Architecture
+
+```text
+fb_group_poster.py       Core task model, CSV validation and Playwright runner
+fb_group_poster_gui.py   Tkinter desktop workflow
+posts.sample.csv         Example queue input
+.env.example             Safe configuration template
+tests/                   Pure helper/validation tests
+.github/workflows/       Windows CI
+```
+
+Authentication remains local to the browser/session you choose. Do not commit session state, cookies, `.env` files, or browser profile data.
 
 ---
 
-## 📖 Hướng dẫn sử dụng cơ bản
-
-1. **Chọn Profile Trình duyệt**:
-   - Tích chọn `Dùng profile thật` $	o$ chọn profile đã đăng nhập sẵn Facebook (Chrome hoặc Cốc Cốc) $	o$ bấm **Chẩn đoán** để kiểm tra kết nối.
-2. **Nhập danh sách nhóm**:
-   - Thêm từng link Group hoặc bấm **Import TXT** để tải danh sách hàng loạt.
-3. **Soạn bài & Đặt lịch**:
-   - Chọn media (kéo thả video/ảnh vào giao diện), nhập Caption bài viết và chọn thời gian đăng.
-   - Bấm **Thêm tất cả nhóm** để đưa vào Hàng đợi (Queue).
-4. **Bắt đầu đăng**:
-   - Kiểm tra lại hàng đợi $	o$ bấm **Start** để tool tự động thực hiện.
-
----
-
-## ⚠️ Lưu ý quan trọng
-- *Chỉ sử dụng công cụ cho các tài khoản và nhóm bạn có quyền quản trị hoặc được phép đăng bài.*
-- *Nên cài đặt khoảng cách thời gian giữa các bài đăng (`MIN_DELAY_SECONDS`, `MAX_DELAY_SECONDS`) hợp lý để tránh bị hạn chế tài khoản.*
+Vietnamese note: đây là công cụ hỗ trợ lên lịch và đăng nội dung bằng browser automation cho các tài khoản/nhóm mà bạn có quyền sử dụng; có GUI, CLI và chế độ Dry Run.
