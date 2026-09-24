@@ -30,5 +30,9 @@ Thumbs.db
 *.db
 cookies.json
 session.json
+.fb_session.json
+error_*.png
+events.jsonl
+events-*.jsonl
 posts.csv
 !posts.sample.csv

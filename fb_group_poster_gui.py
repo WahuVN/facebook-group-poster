@@ -16,6 +16,7 @@ from fb_group_poster import (
     AUDIENCE_PUBLIC,
     PostTask,
     RunnerConfig,
+    default_session_path,
     normalize_audience,
     parse_datetime,
     run_tasks,
@@ -129,7 +130,7 @@ class FbPosterGui:
 
         default_exe, default_user_data = detect_coccoc_defaults()
 
-        self.session_path_var = tk.StringVar(value=str(Path(".fb_session.json").resolve()))
+        self.session_path_var = tk.StringVar(value=str(default_session_path()))
         self.min_delay_var = tk.StringVar(value="20")
         self.max_delay_var = tk.StringVar(value="45")
         self.slow_mo_var = tk.StringVar(value="120")
@@ -1353,7 +1354,7 @@ class FbPosterGui:
         slow_mo = self._parse_int("SlowMo", self.slow_mo_var.get())
         timeout = self._parse_int("Post timeout", self.timeout_var.get())
 
-        session_path = Path(self.session_path_var.get().strip() or ".fb_session.json").expanduser().resolve()
+        session_path = (Path(self.session_path_var.get().strip()).expanduser().resolve() if self.session_path_var.get().strip() else default_session_path())
 
         config = RunnerConfig(
             session_path=session_path,

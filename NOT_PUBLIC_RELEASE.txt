@@ -1,0 +1,11 @@
+NOT PUBLIC RELEASE
+
+This package lane is for local/internal technical verification only.
+
+Public redistribution remains blocked until the owner/controller explicitly resolves:
+1. Root LICENSE / redistribution authority for the Wahu-owned project.
+2. Third-party notice/provenance review for the exact package payload.
+3. Final no-feature-change review of the release candidate.
+
+AI19 does not select a license, grant redistribution rights, push a public release,
+or bundle a browser binary.

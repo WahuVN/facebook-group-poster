@@ -1,8 +1,12 @@
 import csv
+import json
 import os
 import tempfile
+import time
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 import fb_group_poster as app
 
@@ -60,6 +64,118 @@ class CoreHelpersTests(unittest.TestCase):
             self.assertEqual(tasks[0].video_path, media.resolve())
             self.assertEqual(tasks[0].caption, 'Hello\nWorld')
             self.assertEqual(tasks[0].audience, app.AUDIENCE_PUBLIC)
+
+
+class ReliabilityPrivacyTests(unittest.TestCase):
+    def test_retry_transient_is_bounded_with_capped_backoff(self):
+        attempts = []
+        sleeps = []
+
+        def operation():
+            attempts.append(len(attempts) + 1)
+            if len(attempts) < 3:
+                raise ConnectionError('connection reset by peer')
+            return 'ok'
+
+        policy = app.RetryPolicy(
+            max_attempts=3,
+            base_delay_seconds=0.1,
+            max_delay_seconds=0.2,
+            jitter_seconds=0.0,
+        )
+        result = app.run_with_bounded_retry(
+            operation,
+            policy=policy,
+            sleep_fn=sleeps.append,
+            random_fn=lambda: 0.0,
+        )
+        self.assertEqual(result, 'ok')
+        self.assertEqual(len(attempts), 3)
+        self.assertEqual(sleeps, [0.1, 0.2])
+
+    def test_retry_non_transient_is_not_retried(self):
+        attempts = []
+        sleeps = []
+
+        def operation():
+            attempts.append(1)
+            raise ValueError('selector contract changed')
+
+        with self.assertRaises(ValueError):
+            app.run_with_bounded_retry(operation, sleep_fn=sleeps.append)
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual(sleeps, [])
+
+    def test_retry_ambiguous_publish_state_is_not_retried(self):
+        attempts = []
+
+        def operation():
+            attempts.append(1)
+            raise app.AmbiguousPublishStateError('submit unknown')
+
+        with self.assertRaises(app.AmbiguousPublishStateError):
+            app.run_with_bounded_retry(operation, sleep_fn=lambda _seconds: None)
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual(
+            app.classify_retry_error(app.AmbiguousPublishStateError('submit unknown')),
+            'publish_state_ambiguous',
+        )
+
+    def test_structured_jsonl_logging_redacts_sensitive_fields(self):
+        with tempfile.TemporaryDirectory() as td:
+            log_path = Path(td) / 'events.jsonl'
+            logger = app.JsonlEventLogger(log_path, run_id='run-test')
+            self.assertTrue(
+                logger.emit(
+                    'task_finished',
+                    status='failed',
+                    token='top-secret-token',
+                    session_path='C:/private/session.json',
+                    message='Authorization: Bearer super-secret-bearer',
+                )
+            )
+            lines = log_path.read_text(encoding='utf-8').splitlines()
+            self.assertEqual(len(lines), 1)
+            payload = json.loads(lines[0])
+            self.assertEqual(payload['run_id'], 'run-test')
+            self.assertEqual(payload['event'], 'task_finished')
+            self.assertEqual(payload['status'], 'failed')
+            self.assertEqual(payload['token'], '[REDACTED]')
+            self.assertEqual(payload['session_path'], '[REDACTED]')
+            self.assertIn('Bearer [REDACTED]', payload['message'])
+            self.assertNotIn('top-secret-token', lines[0])
+            self.assertNotIn('super-secret-bearer', lines[0])
+            self.assertIn('ts', payload)
+
+    def test_save_session_state_is_atomic(self):
+        class FakeContext:
+            def storage_state(self, *, path):
+                Path(path).write_text('{"cookies":[]}', encoding='utf-8')
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            destination = root / 'nested' / 'session.json'
+            app.save_session_state(FakeContext(), destination)
+            self.assertEqual(destination.read_text(encoding='utf-8'), '{"cookies":[]}')
+            self.assertEqual(list(destination.parent.glob('*.tmp')), [])
+
+    def test_default_session_path_uses_local_app_data(self):
+        with tempfile.TemporaryDirectory() as td:
+            with patch.dict(os.environ, {'LOCALAPPDATA': td}, clear=False):
+                expected = Path(td).resolve() / 'WAHU' / 'FacebookPublisher' / 'session.json'
+                self.assertEqual(app.default_session_path(), expected)
+                self.assertEqual(
+                    app.default_event_log_path(),
+                    expected.parent / 'logs' / 'events.jsonl',
+                )
+
+    def test_wait_until_deadline_has_low_drift(self):
+        target = datetime.now() + timedelta(seconds=0.12)
+        started = time.perf_counter()
+        self.assertTrue(app.wait_until(target))
+        elapsed = time.perf_counter() - started
+        self.assertGreaterEqual(elapsed, 0.08)
+        self.assertLess(elapsed, 0.60)
 
 
 if __name__ == '__main__':

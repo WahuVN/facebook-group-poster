@@ -1,13 +1,15 @@
 ﻿import argparse
 import csv
+import json
 import os
 import random
 import re
 import time
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 from urllib.parse import unquote, urlparse
 
 from dotenv import load_dotenv
@@ -57,6 +59,7 @@ class RunnerConfig:
     browser_executable_path: str | None = None
     user_data_dir: Path | None = None
     profile_directory: str | None = None
+    event_log_path: Path | None = None
 
 
 @dataclass
@@ -65,6 +68,191 @@ class RunnerStats:
     success: int = 0
     failed: int = 0
     stopped: bool = False
+
+
+@dataclass(frozen=True)
+class RetryPolicy:
+    max_attempts: int = 3
+    base_delay_seconds: float = 0.75
+    max_delay_seconds: float = 4.0
+    jitter_seconds: float = 0.25
+
+
+class AmbiguousPublishStateError(RuntimeError):
+    """Submit may have happened, but success could not be confirmed safely."""
+
+
+_SENSITIVE_KEY_RE = re.compile(
+    r"(?:password|passwd|token|secret|cookie|authorization|session|storage[_-]?state|profile)",
+    re.I,
+)
+_SENSITIVE_TEXT_PATTERNS = [
+    (re.compile(r"(?i)\b(Bearer)\s+[^\s,;]+"), r"\1 [REDACTED]"),
+    (
+        re.compile(r"(?i)\b(token|password|passwd|cookie|secret|session)\s*[:=]\s*[^\s,;]+"),
+        r"\1=[REDACTED]",
+    ),
+]
+
+
+def app_data_dir() -> Path:
+    local_app_data = os.getenv("LOCALAPPDATA", "").strip()
+    if local_app_data:
+        return Path(local_app_data).expanduser().resolve() / "WAHU" / "FacebookPublisher"
+    return Path.home().expanduser().resolve() / ".local" / "share" / "WAHU" / "FacebookPublisher"
+
+
+def default_session_path() -> Path:
+    return app_data_dir() / "session.json"
+
+
+def default_event_log_path() -> Path:
+    return app_data_dir() / "logs" / "events.jsonl"
+
+
+def error_artifact_path(row_number: int, stamp: str | None = None) -> Path:
+    safe_stamp = stamp or datetime.now().strftime("%Y%m%d_%H%M%S")
+    return app_data_dir() / "artifacts" / f"error_{row_number}_{safe_stamp}.png"
+
+
+def redact_sensitive(value: Any, *, key: str | None = None) -> Any:
+    if key and _SENSITIVE_KEY_RE.search(key):
+        return "[REDACTED]"
+    if isinstance(value, dict):
+        return {str(k): redact_sensitive(v, key=str(k)) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [redact_sensitive(item) for item in value]
+    if isinstance(value, Path):
+        value = str(value)
+    if isinstance(value, str):
+        redacted = value
+        for pattern, replacement in _SENSITIVE_TEXT_PATTERNS:
+            redacted = pattern.sub(replacement, redacted)
+        return redacted
+    return value
+
+
+class JsonlEventLogger:
+    def __init__(self, path: Path, *, run_id: str | None = None) -> None:
+        self.path = Path(path).expanduser().resolve()
+        self.run_id = run_id or uuid.uuid4().hex
+
+    def emit(self, event: str, **fields: Any) -> bool:
+        payload: dict[str, Any] = {
+            "ts": datetime.now().astimezone().isoformat(timespec="milliseconds"),
+            "run_id": self.run_id,
+            "event": event,
+        }
+        payload.update(fields)
+        safe_payload = redact_sensitive(payload)
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with self.path.open("a", encoding="utf-8", newline="\n") as handle:
+                handle.write(json.dumps(safe_payload, ensure_ascii=False, separators=(",", ":")))
+                handle.write("\n")
+            return True
+        except OSError:
+            return False
+
+
+def save_session_state(context, state_path: Path) -> None:
+    """Persist Playwright storage state atomically; default destination is outside the repo."""
+    destination = Path(state_path).expanduser().resolve()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        context.storage_state(path=str(temp_path))
+        os.replace(temp_path, destination)
+    finally:
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def classify_retry_error(error: Exception) -> str:
+    if isinstance(error, AmbiguousPublishStateError):
+        return "publish_state_ambiguous"
+    if isinstance(error, ConnectionError):
+        return "transient_network"
+
+    text = str(error).lower()
+    non_retryable_markers = (
+        "captcha",
+        "checkpoint",
+        "permission",
+        "not authorized",
+        "unauthorized",
+        "forbidden",
+        "đăng nhập",
+        "login",
+        "quyền đăng",
+        "không tìm thấy",
+        "không mở được khung",
+        "không bấm được nút đăng",
+    )
+    if any(marker in text for marker in non_retryable_markers):
+        return "non_retryable"
+
+    transient_markers = (
+        "net::err_",
+        "connection reset",
+        "connection aborted",
+        "connection refused",
+        "network changed",
+        "temporarily unavailable",
+        "temporary failure",
+        "service unavailable",
+        "bad gateway",
+        "gateway timeout",
+    )
+    if any(marker in text for marker in transient_markers):
+        return "transient_network"
+    return "unknown"
+
+
+def retry_delay_seconds(
+    policy: RetryPolicy,
+    retry_number: int,
+    *,
+    random_value: float | None = None,
+) -> float:
+    exponent = max(retry_number - 1, 0)
+    base = min(policy.max_delay_seconds, policy.base_delay_seconds * (2**exponent))
+    jitter_source = random.random() if random_value is None else min(max(random_value, 0.0), 1.0)
+    return min(policy.max_delay_seconds, base + (policy.jitter_seconds * jitter_source))
+
+
+def run_with_bounded_retry(
+    operation: Callable[[], Any],
+    *,
+    policy: RetryPolicy | None = None,
+    stop_fn: StopFn | None = None,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    random_fn: Callable[[], float] = random.random,
+    on_retry: Callable[[int, str, float], None] | None = None,
+) -> Any:
+    """Retry only explicitly transient failures for caller-selected idempotent operations."""
+    active_policy = policy or RetryPolicy()
+    attempts = max(1, active_policy.max_attempts)
+
+    for attempt in range(1, attempts + 1):
+        if _should_stop(stop_fn):
+            raise InterruptedError("Đã dừng theo yêu cầu người dùng")
+        try:
+            return operation()
+        except Exception as error:
+            error_class = classify_retry_error(error)
+            if error_class != "transient_network" or attempt >= attempts:
+                raise
+            delay = retry_delay_seconds(active_policy, attempt, random_value=random_fn())
+            if on_retry:
+                on_retry(attempt + 1, error_class, delay)
+            if _should_stop(stop_fn):
+                raise InterruptedError("Đã dừng theo yêu cầu người dùng") from error
+            sleep_fn(delay)
+
+    raise RuntimeError("Retry loop kết thúc ngoài dự kiến")
 
 
 def env_bool(name: str, default: bool) -> bool:
@@ -185,9 +373,13 @@ def load_tasks(csv_path: Path) -> list[PostTask]:
 
 def build_config_from_env(headless_override: bool = False) -> RunnerConfig:
     user_data_dir = os.getenv("BROWSER_USER_DATA_DIR", "").strip()
+    session_raw = os.getenv("FB_SESSION_PATH", "").strip()
+    event_log_raw = os.getenv("FB_EVENT_LOG_PATH", "").strip()
 
     return RunnerConfig(
-        session_path=Path(os.getenv("FB_SESSION_PATH", ".fb_session.json")).resolve(),
+        session_path=(
+            Path(session_raw).expanduser().resolve() if session_raw else default_session_path()
+        ),
         min_delay=int(os.getenv("MIN_DELAY_SECONDS", "20")),
         max_delay=int(os.getenv("MAX_DELAY_SECONDS", "45")),
         slow_mo_ms=int(os.getenv("SLOW_MO_MS", "120")),
@@ -200,6 +392,9 @@ def build_config_from_env(headless_override: bool = False) -> RunnerConfig:
         browser_executable_path=os.getenv("BROWSER_EXECUTABLE_PATH", "").strip() or None,
         user_data_dir=Path(user_data_dir).expanduser().resolve() if user_data_dir else None,
         profile_directory=os.getenv("BROWSER_PROFILE_DIRECTORY", "").strip() or None,
+        event_log_path=(
+            Path(event_log_raw).expanduser().resolve() if event_log_raw else default_event_log_path()
+        ),
     )
 
 
@@ -278,18 +473,20 @@ def wait_until(
     stop_fn: StopFn | None = None,
     tick_fn: TickFn | None = None,
 ) -> bool:
+    initial_remaining = max((schedule_at - datetime.now()).total_seconds(), 0.0)
+    deadline = time.monotonic() + initial_remaining
+
     while True:
         if _should_stop(stop_fn):
             return False
 
-        now = datetime.now()
-        if now >= schedule_at:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
             return True
 
-        delta = int((schedule_at - now).total_seconds())
         if tick_fn:
-            tick_fn(max(delta, 0))
-        time.sleep(1)
+            tick_fn(max(int(remaining + 0.999), 0))
+        time.sleep(min(remaining, 0.25))
 
 
 def dismiss_common_popups(page) -> None:
@@ -345,8 +542,8 @@ def ensure_logged_in(
     page.goto("https://www.facebook.com/", wait_until="domcontentloaded")
 
     if not is_login_screen(page):
-        context.storage_state(path=str(state_path))
-        log_fn(f"[OK] Session đã lưu: {state_path}")
+        save_session_state(context, state_path)
+        log_fn("[OK] Session cục bộ đã được cập nhật an toàn.")
         return
 
     log_fn("[!] Chưa đăng nhập Facebook trong session hiện tại")
@@ -368,8 +565,8 @@ def ensure_logged_in(
     if is_login_screen(page):
         raise RuntimeError("Vẫn chưa đăng nhập, dừng script.")
 
-    context.storage_state(path=str(state_path))
-    log_fn(f"[OK] Session đã lưu: {state_path}")
+    save_session_state(context, state_path)
+    log_fn("[OK] Session cục bộ đã được cập nhật an toàn.")
 
 
 def open_composer(page) -> None:
@@ -478,6 +675,10 @@ def wait_post_done(page, timeout_ms: int) -> None:
         except Exception:
             continue
 
+    raise AmbiguousPublishStateError(
+        "Không xác nhận được kết quả sau khi bấm Đăng; không tự retry để tránh đăng trùng."
+    )
+
 
 def is_personal_profile_target(url: str) -> bool:
     raw = (url or "").strip()
@@ -577,6 +778,8 @@ def post_video_to_group(
     stop_fn: StopFn | None,
     wait_tick_fn: TickFn | None,
     log_fn: LogFn,
+    event_logger: JsonlEventLogger | None = None,
+    retry_policy: RetryPolicy | None = None,
 ) -> bool:
     log_fn(f"\n[>] Dòng {task.row_number} | Đích: {task.group_url}")
     target_is_personal = is_personal_profile_target(task.group_url)
@@ -598,7 +801,27 @@ def post_video_to_group(
     if _should_stop(stop_fn):
         return False
 
-    page.goto(task.group_url, wait_until="domcontentloaded")
+    def on_navigation_retry(next_attempt: int, error_class: str, delay: float) -> None:
+        log_fn(
+            f"  - [RETRY] Lỗi mạng tạm thời trước submit; thử {next_attempt}/"
+            f"{(retry_policy or RetryPolicy()).max_attempts} sau {delay:.2f}s"
+        )
+        if event_logger:
+            event_logger.emit(
+                "retry_scheduled",
+                row_number=task.row_number,
+                status="retrying",
+                attempt=next_attempt,
+                error_class=error_class,
+                delay_ms=round(delay * 1000),
+            )
+
+    run_with_bounded_retry(
+        lambda: page.goto(task.group_url, wait_until="domcontentloaded"),
+        policy=retry_policy,
+        stop_fn=stop_fn,
+        on_retry=on_navigation_retry,
+    )
     dismiss_common_popups(page)
     open_composer(page)
     if target_is_personal and mode != AUDIENCE_DEFAULT:
@@ -622,16 +845,27 @@ def run_tasks(
 ) -> RunnerStats:
     logger = log_fn or _default_log
     stats = RunnerStats(total=len(tasks))
+    retry_policy = RetryPolicy()
+    event_logger = JsonlEventLogger(config.event_log_path or default_event_log_path())
+    run_started = time.monotonic()
+    event_logger.emit(
+        "run_started",
+        status="running",
+        total_tasks=len(tasks),
+        dry_run=dry_run,
+    )
 
     if config.max_delay < config.min_delay:
         config.max_delay = config.min_delay
 
     if not tasks:
         logger("[!] Không có task hợp lệ để chạy")
+        event_logger.emit("run_finished", status="empty", total_tasks=0, elapsed_ms=0)
         return stats
 
     if config.headless and not config.session_path.exists():
         if config.user_data_dir is None:
+            event_logger.emit("run_failed", status="failed", error_class="missing_session")
             raise RuntimeError(
                 "Headless cần session đăng nhập sẵn. Hãy chạy 1 lần không headless để login."
             )
@@ -642,6 +876,11 @@ def run_tasks(
         try:
             browser, context = _open_browser_context(playwright, config, log_fn=logger)
         except Exception as error:
+            event_logger.emit(
+                "run_failed",
+                status="failed",
+                error_class=classify_retry_error(error),
+            )
             if config.user_data_dir is not None:
                 raise RuntimeError(
                     "Không mở được browser từ cấu hình Cốc Cốc (profile thật và cả fallback session). "
@@ -667,8 +906,20 @@ def run_tasks(
                 if _should_stop(stop_fn):
                     stats.stopped = True
                     logger("[!] Đã dừng theo yêu cầu người dùng")
+                    event_logger.emit(
+                        "run_stopped",
+                        status="stopped",
+                        completed_tasks=stats.success + stats.failed,
+                    )
                     break
 
+                task_started = time.monotonic()
+                event_logger.emit(
+                    "task_started",
+                    row_number=task.row_number,
+                    status="running",
+                    queue_index=index,
+                )
                 try:
                     completed = post_video_to_group(
                         page,
@@ -678,22 +929,44 @@ def run_tasks(
                         stop_fn=stop_fn,
                         wait_tick_fn=wait_tick_fn,
                         log_fn=logger,
+                        event_logger=event_logger,
+                        retry_policy=retry_policy,
                     )
                     if not completed:
                         stats.stopped = True
                         logger("[!] Đã dừng theo yêu cầu người dùng")
+                        event_logger.emit(
+                            "task_finished",
+                            row_number=task.row_number,
+                            status="stopped",
+                            elapsed_ms=round((time.monotonic() - task_started) * 1000),
+                        )
                         break
                     stats.success += 1
+                    event_logger.emit(
+                        "task_finished",
+                        row_number=task.row_number,
+                        status="success",
+                        elapsed_ms=round((time.monotonic() - task_started) * 1000),
+                    )
                 except Exception as post_error:
                     stats.failed += 1
-                    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    screenshot = Path(f"error_{task.row_number}_{stamp}.png").resolve()
+                    screenshot = error_artifact_path(task.row_number)
                     try:
+                        screenshot.parent.mkdir(parents=True, exist_ok=True)
                         page.screenshot(path=str(screenshot), full_page=True)
+                        logger("  - Ảnh lỗi đã lưu trong thư mục dữ liệu cục bộ.")
                     except Exception:
-                        pass
+                        logger("  - Không lưu được ảnh lỗi cục bộ.")
+                    error_class = classify_retry_error(post_error)
                     logger(f"  - [ERR] {post_error}")
-                    logger(f"  - Ảnh lỗi: {screenshot}")
+                    event_logger.emit(
+                        "task_finished",
+                        row_number=task.row_number,
+                        status="failed",
+                        error_class=error_class,
+                        elapsed_ms=round((time.monotonic() - task_started) * 1000),
+                    )
 
                 if index < len(tasks) and not stats.stopped:
                     sleep_seconds = random.randint(config.min_delay, config.max_delay)
@@ -710,10 +983,18 @@ def run_tasks(
                     if stats.stopped:
                         break
 
-            context.storage_state(path=str(config.session_path))
-            logger(f"\n[OK] Hoàn tất. Session lưu tại: {config.session_path}")
+            save_session_state(context, config.session_path)
+            logger("\n[OK] Hoàn tất. Session cục bộ đã được cập nhật an toàn.")
             logger(
                 f"[i] Kết quả: thành công={stats.success}, lỗi={stats.failed}, dừng={stats.stopped}"
+            )
+            event_logger.emit(
+                "run_finished",
+                status="stopped" if stats.stopped else "finished",
+                success=stats.success,
+                failed=stats.failed,
+                stopped=stats.stopped,
+                elapsed_ms=round((time.monotonic() - run_started) * 1000),
             )
         finally:
             context.close()
